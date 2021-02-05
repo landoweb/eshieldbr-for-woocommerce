@@ -51,7 +51,6 @@ class WC_EshieldBR {
 
 		add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
-		//add_action( 'wp_loaded', array( $this, 'wc_flp_callback' ) );
 
 		// Hooks for WooCommerce
 		add_filter( 'manage_shop_order_posts_columns', array( $this, 'add_column' ), 11 );
@@ -493,38 +492,8 @@ class WC_EshieldBR {
 			wp_enqueue_script( 'eshieldbr_woocommerce_admin_script', plugins_url( '/assets/js/script.js', WC_FLP_DIR ), array( 'jquery' ), '1.0', true );
 		}
 
-		// if ( is_admin() && get_user_meta( get_current_user_id(), 'eshieldbr_woocommerce_admin_notice', true ) !== 'dismissed' ) {
-		// 	wp_localize_script( 'eshieldbr_woocommerce_admin_script', 'eshieldbr_woocommerce_admin', array( 'eshieldbr_woocommerce_admin_nonce' => wp_create_nonce( 'eshieldbr_woocommerce_admin_nonce' ), ) );
-		// }
-
 		wp_enqueue_style( 'eshieldbr_pro_admin_menu_styles', untrailingslashit( plugins_url( '/', WC_FLP_DIR ) ) . '/assets/css/style.css', array() );
-
-		if ( $hook == 'plugins.php' ) {
-			// Add in required libraries for feedback modal
-			wp_enqueue_script('jquery-ui-dialog');
-			wp_enqueue_style('wp-jquery-ui-dialog');
-
-			wp_enqueue_script( 'eshieldbr_pro_woocommerce_admin_script', plugins_url( '/assets/js/feedback.js', WC_FLP_DIR ), array( 'jquery' ), true );
-		}
-		elseif ( $hook != 'toplevel_page_woocommerce-eshieldbr ' ) {
-			return;
-		}
 	}
-
-
-
-
-
-	/**
-	 *	Dismiss the admin notice.
-	 */
-	// function plugin_dismiss_admin_notice() {
-	// 	if ( ! isset( $_POST['eshieldbr_woocommerce_admin_nonce'] ) || ! wp_verify_nonce( $_POST['eshieldbr_woocommerce_admin_nonce'], 'eshieldbr_woocommerce_admin_nonce' ) ) {
-	// 		wp_die();
-	// 	}
-	// 	update_user_meta( get_current_user_id(), 'eshieldbr_woocommerce_admin_notice', 'dismissed' );
-	// }
-
 
 	/**
 	 * Admin menu.
@@ -1157,20 +1126,6 @@ class WC_EshieldBR {
 			file_put_contents( ESHIELDBR_ROOT . 'eshieldbr.log', gmdate('Y-m-d H:i:s') . "\t" . $message . "\n", FILE_APPEND );
 		}
 	}
-
-	/**
-	 * Use WP_LOADED for the callback function to work.
-	 */
-	// function wc_flp_callback() {
-	// 	global $wp;
-	// 	$current_host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '';
-	// 	$current_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
-	// 	$current_url = $current_host . $current_uri;
-
-	// 	if (strpos($current_url, 'flp-callback.php')) {
-	// 		include(plugin_dir_path(__FILE__) . 'flp-callback.php');
-	// 	}
-	// }
 
 	/**
 	 * Parse EshieldBR API result.
