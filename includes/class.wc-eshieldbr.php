@@ -42,7 +42,6 @@ class WC_EshieldBR {
 		$this->reject_status		= 'wc-cancelled';
 		$this->db_err_status		= 'wc-failed';
 		$this->fraud_message		= $this->get_setting( 'fraud_message' );
-		$this->test_ip				= $this->get_setting( 'test_ip' );
 		$this->debug_log			= $this->get_setting( 'debug_log' );
 		
 		if ( ! $this->username || ! $this->password ) {
@@ -54,6 +53,8 @@ class WC_EshieldBR {
 
 		// Hooks for WooCommerce
 		add_filter( 'manage_shop_order_posts_columns', array( $this, 'add_column' ), 11 );
+		add_filter( 'http_request_timeout', array( $this, 'timeout_extend' ), 11 );
+
 		add_action( 'manage_shop_order_posts_custom_column', array( $this, 'render_column' ), 3 );
 		add_action( 'woocommerce_admin_order_data_after_billing_address', array( $this, 'render_fraud_report' ) );
 		add_action( 'woocommerce_after_checkout_form', array( $this, 'javascript_agent' ) );
@@ -61,7 +62,14 @@ class WC_EshieldBR {
 		add_action( 'woocommerce_before_thankyou', array( $this, 'order_status_changed' ), 99, 3 );
 		add_action( 'woocommerce_order_status_completed', array( $this, 'order_status_completed' ) );
 		add_action( 'woocommerce_order_status_cancelled', array( $this, 'order_status_cancelled' ) );
+		add_action( 'woocommerce_order_status_processing', array( $this, 'order_status_changed' ), 99, 3 );
 	}
+
+	public static function timeout_extend( $time )
+	{
+	    // Default timeout is 5
+	    return 45;
+	}	
 
 	/**
 	 * WooCommerce missing notice.
@@ -115,10 +123,10 @@ class WC_EshieldBR {
 		}
 
 		// Verifique se o pedido foi rastreado
-		$result = get_post_meta( $this->order->get_id(), '_eshieldbr' );
-		if( count( $result ) > 0 ) {
-			return;
-		}
+		// $result = get_post_meta( $this->order->get_id(), '_eshieldbr' );
+		// if( count( $result ) > 0 ) {
+		// 	return;
+		// }
 
 		// Verifique novamente se o pedido foi analisado
 		if ( $this->get_order_notes( $this->order->get_id() ) ) {
@@ -162,86 +170,7 @@ class WC_EshieldBR {
 				$payment_mode = 'others';
 		}
 
-		// Colete informações de IP após o gateway de pagamento
-		$ip_x_sucuri_after = $ip_incap_after = $ip_http_cf_connecting_after = $ip_x_real_after = $ip_x_forwarded_for_after ='::1';
-
-		if ( isset( $_SERVER['HTTP_X_SUCURI_CLIENTIP'] ) && filter_var( $_SERVER['HTTP_X_SUCURI_CLIENTIP'], FILTER_VALIDATE_IP ) ) {
-			$ip_x_sucuri_after = $_SERVER['HTTP_X_SUCURI_CLIENTIP'];
-		}
-
-		if( isset( $_SERVER['HTTP_INCAP_CLIENT_IP'] ) && filter_var( $_SERVER['HTTP_INCAP_CLIENT_IP'], FILTER_VALIDATE_IP ) ) {
-			$ip_incap_after = $_SERVER['HTTP_INCAP_CLIENT_IP'];
-		}
-
-		if( isset( $_SERVER['HTTP_CF_CONNECTING_IP'] ) && filter_var( $_SERVER['HTTP_CF_CONNECTING_IP'], FILTER_VALIDATE_IP ) ) {
-			$ip_http_cf_connecting_after = $_SERVER['HTTP_CF_CONNECTING_IP'];
-		}
-
-		if ( isset( $_SERVER['HTTP_X_REAL_IP'] ) ) {
-			$ip_x_real_after = $_SERVER['HTTP_X_REAL_IP'];
-		}
-
-		if( isset( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
-			$xip = trim( current( explode( ',', $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) );
-
-			if ( filter_var( $xip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) ) {
-				$ip_x_forwarded_for_after = $xip;
-			}
-		}
-
-		// A função interna verificará X_REAL_IP seguido por X_FORWARDED_FOR e REMOTE_ADDR
-		// O endereço IP incorreto do Paypal foi resolvido usando a função abaixo
-		// $client_ip = $this->order->get_customer_ip_address();
-
-		// Obter resultado de IP
-		/*
-		$result_ip = get_post_meta( $this->order->get_id(), '_eshieldbr_ip_before' );
-
-		if( count( $result_ip ) > 0 ) {
-			if ( !is_array( $result_ip[0] ) && strpos( $result_ip[0], '\\' ) ) {
-				$result_ip[0] = str_replace( '\\', '', $result_ip[0] );
-			}
-
-			if ( !is_array( $result_ip[0] ) ) {
-				$row = json_decode( $result_ip[0] );
-
-				$ip_x_sucuri_before = $row->ip_x_sucuri_before;
-				$ip_incap_before = $row->ip_incap_before;
-				$ip_http_cf_connecting_before = $row->ip_http_cf_connecting_before;
-				$ip_x_real_before = $row->ip_x_real_before;
-				$ip_x_forwarded_for_before = $row->ip_x_forwarded_for_before;
-				$ip_remote_addr_before = $row->ip_remote_addr_before;
-			} else {
-				$row = $result_ip[0];
-
-				$ip_x_sucuri_before = $row['ip_x_sucuri_before'];
-				$ip_incap_before = $row['ip_incap_before'];
-				$ip_http_cf_connecting_before = $row['ip_http_cf_connecting_before'];
-				$ip_x_real_before = $row['ip_x_real_before'];
-				$ip_x_forwarded_for_before = $row['ip_x_forwarded_for_before'];
-				$ip_remote_addr_before = $row['ip_remote_addr_before'];
-			}
-
-			if ( isset( $_SERVER['HTTP_X_SUCURI_CLIENTIP'] ) && $ip_x_sucuri_before != '::1' ) {
-				$client_ip = $ip_x_sucuri_before;
-			} elseif( isset( $_SERVER['HTTP_INCAP_CLIENT_IP'] ) && $ip_incap_before != '::1' ) {
-				$client_ip = $ip_incap_before;
-			} elseif( isset( $_SERVER['HTTP_CF_CONNECTING_IP'] ) && $ip_http_cf_connecting_before != '::1' ){
-				$client_ip = $ip_http_cf_connecting_before;
-			} elseif ( isset( $_SERVER['HTTP_X_REAL_IP'] ) && $ip_x_real_before != '::1' ) {
-				$client_ip = $ip_x_real_before;
-			} elseif ( isset( $_SERVER['HTTP_X_FORWARDED_FOR'] ) && $ip_x_forwarded_for_before != '::1' ) {
-				$client_ip = $ip_x_forwarded_for_before;
-			} elseif ( isset( $_SERVER['REMOTE_ADDR'] ) ) {
-				$client_ip = $ip_remote_addr_before;
-			}
-		} elseif ( $ip_x_real_after != '::1' ) {
-			// Obter IP via pedido do eBay [YLL-612-89047]
-			$client_ip = $ip_x_real_after;
-		}
-		*/
-
-		$client_ip = $_SERVER['REMOTE_ADDR'];
+		$client_ip = ($_SERVER['REMOTE_ADDR'] == '::1') ? '127.0.0.1' : $_SERVER['REMOTE_ADDR'];
 
 		$credit_card_number = $this->order->get_meta( '_wc_rede_transaction_bin' );
 
@@ -284,7 +213,7 @@ class WC_EshieldBR {
 			'card_last'						=> $this->order->get_meta( '_wc_rede_transaction_last4' ),
 			'cpf'							=> $this->limpaCPF_CNPJ($cpf),
 			'email'							=> ( WC()->version < '2.7.0' ) ? $this->order->billing_email : $this->order->get_billing_email(),
-			'ip'							=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
+			'ip'							=> $client_ip,
 			'merchant_id'					=> get_bloginfo( 'name' ),
 			'payment_mode'					=> $payment_gateway->id,
 			'phone_number'					=> $phone_number,
@@ -304,7 +233,9 @@ class WC_EshieldBR {
 
 		$this->write_debug_log( 'Dados a serem enviado para EshieldBR(validate_order): ' . serialize($data) );
 
+		$repeat = false;
 		$request = wp_remote_post( $url, array(
+			'timeout' => 45,
 		    'body'    => $data,
 		    'headers' => array(
 		        'Authorization' => $token,
@@ -314,13 +245,13 @@ class WC_EshieldBR {
 
 		// Give up fraud check if having network issue
 		if ( is_wp_error( $request ) ) {
-			$this->write_debug_log( 'Falha na Verificação da EshieldBR para o pedido ' . $this->order->get_id() . '. Erro durante a verificação do pedido. Erro: ' . $request->get_error_message() );
-			$this->order->add_order_note( 'Falha na Verificação da EshieldBR para o pedido ' . $this->order->get_id() . '. Erro durante a verificação do pedido. Erro: ' . $request->get_error_message() );
+			$this->write_debug_log( 'Falha no servidor de origem para o pedido ' . $this->order->get_id() . '. Erro: ' . $request->get_error_message() );
+			$this->order->add_order_note( 'Falha no servidor de origem para o pedido ' . $this->order->get_id() . '. Erro: ' . $request->get_error_message() );
 
 			// Save the static data to prevent duplicate checking
 			$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
 				'order_id'						=> $this->order->get_id(),
-				'ip_address'					=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
+				'ip_address'					=> $client_ip,
 				'eshieldbr_id'					=> '',
 				'username'						=> $this->username,
 				'password'						=> $this->password,
@@ -330,21 +261,54 @@ class WC_EshieldBR {
 				$this->write_debug_log( 'ERROR 103 - a função add_post_meta falhou.' );
 			}
 
-			return;
+			$repeat = true;
 		}
+
+		if($repeat) {
+
+			$request = wp_remote_post( $url, array(
+				'timeout' => 60,
+			    'body'    => $data,
+			    'headers' => array(
+			        'Authorization' => $token,
+			        'cache-control' => 'no-cache',
+			    ),
+			) );
+
+			// Give up fraud check if having network issue
+			if ( is_wp_error( $request ) ) {
+				$this->write_debug_log( 'Falha na segunda verificação para o pedido ' . $this->order->get_id() . '. Erro: ' . $request->get_error_message() );
+				$this->order->add_order_note( 'Falha na segunda verificação para o pedido ' . $this->order->get_id() . '. Erro: ' . $request->get_error_message() );
+
+				// Save the static data to prevent duplicate checking
+				$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
+					'order_id'						=> $this->order->get_id(),
+					'ip_address'					=> $client_ip,
+					'eshieldbr_id'					=> '',
+					'username'						=> $this->username,
+					'password'						=> $this->password,
+				) );
+
+				if ( ! $add_post_meta_result ) {
+					$this->write_debug_log( 'ERROR 103 - a função add_post_meta falhou.' );
+				}
+
+				return;
+			}
+		}		
 
 		// Get the HTTP response
 		$response = json_decode( wp_remote_retrieve_body( $request ) );
 
 		// Make sure response is an object
 		if ( ! is_object( $response ) ) {
-			$this->write_debug_log( 'Falha na Verificação da EshieldBR para o pedido ' . $this->order->get_id() . ' devido a um problema de rede.' );
-			$this->order->add_order_note( 'Falha na Verificação da EshieldBR para o pedido ' . $this->order->get_id() . ' devido a um problema de rede.' );
+			$this->write_debug_log( 'Falha na integração EshieldBR para o pedido ' . $this->order->get_id() . ' devido a um problema de rede.' );
+			$this->order->add_order_note( 'Falha na integração EshieldBR para o pedido ' . $this->order->get_id() . ' devido a um problema de rede.' );
 
 			// Save the static data to prevent duplicate checking
 			$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
 				'order_id'						=> $this->order->get_id(),
-				'ip_address'					=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
+				'ip_address'					=> $client_ip,
 				'eshieldbr_id'					=> '',
 				'username'						=> $this->username,
 				'password'						=> $this->password,
@@ -360,14 +324,26 @@ class WC_EshieldBR {
 		if( is_object($response->error) ) {
 			$this->write_debug_log( 'Código de erro: ' . $response->error->code );
 			$this->write_debug_log( 'Mensagem de erro: ' . $response->error->message );
-		} else {
-			$this->write_debug_log( 'Response obtida: ' . $response->resposta->mensagem );
+			$this->order->add_order_note( 'Mensagem de erro: ' . $response->error->message );
+			return;
+
+		} elseif(is_object($response->resposta)) {
+
+			if($response->resposta->erro == 1) {
+				$this->write_debug_log( 'Mensagem de resposta: ' . $response->resposta->mensagem );
+				$this->order->add_order_note( 'Mensagem de resposta: ' . $response->resposta->mensagem );
+				return;
+
+			} else {
+				$this->write_debug_log( 'Resposta aprovada: ' . $response->resposta->aprovado );
+				$this->order->add_order_note( 'Resposta aprovada: ' . $response->resposta->aprovado );				
+			}
 		}
 
 		// Save fraud check result
 		$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
 			'order_id'						=> $this->order->get_id(),
-			'ip_address'					=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
+			'ip_address'					=> $client_ip,
 			'eshieldbr_error_code'			=> $response->resposta->erro,
 			'eshieldbr_transaction'			=> $response->resposta->transaction_id,
 			'eshieldbr_id'					=> $response->resposta->eshield_id,
@@ -381,7 +357,7 @@ class WC_EshieldBR {
 			$this->write_debug_log( 'ERROR 105 - a função add_post_meta falhou.' );
 		}
 
-		if ( isset($response->resposta->mensagem) && strpos( $response->resposta->mensagem, 'SYSTEM DATABASE ERROR' ) !== false ) {
+		if ( is_object($response->resposta) && isset($response->resposta->mensagem) && strpos( $response->resposta->mensagem, 'SYSTEM DATABASE ERROR' ) !== false ) {
 			$this->write_debug_log( 'Erro do banco de dados do sistema EshieldBR.' . $response->resposta->mensagem );
 			$this->order->add_order_note( 'Erro do banco de dados do sistema EshieldBR.' . $response->resposta->mensagem );
 		}
@@ -438,7 +414,7 @@ class WC_EshieldBR {
 			// Save the static data to prevent duplicate checking
 			$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
 				'order_id'						=> $this->order->get_id(),
-				'ip_address'					=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
+				'ip_address'					=> $client_ip,
 				'eshieldbr_id'					=> '',
 				'username'						=> $this->username,
 				'password'						=> $this->password,
@@ -462,8 +438,8 @@ class WC_EshieldBR {
 			// Save the static data to prevent duplicate checking
 			$add_post_meta_result = add_post_meta( $this->order->get_id(), '_eshieldbr', array(
 				'order_id'						=> $this->order->get_id(),
-				'ip_address'					=> ( filter_var( $this->test_ip, FILTER_VALIDATE_IP ) ) ? $this->test_ip : $client_ip,
-				'eshieldbr_id'				=> '',
+				'ip_address'					=> $client_ip,
+				'eshieldbr_id'					=> '',
 				'username'						=> $this->username,
 				'password'						=> $this->password,
 			) );
@@ -526,23 +502,9 @@ class WC_EshieldBR {
 		$reject_status = 'wc-cancelled';
 		$db_err_status = 'wc-failed';
 		$fraud_message = ( isset( $_POST['fraud_message'] ) ) ? sanitize_text_field($_POST['fraud_message']) : $this->get_setting( 'fraud_message' );
-		$test_ip = ( isset( $_POST['test_ip'] ) ) ? sanitize_text_field($_POST['test_ip']) : $this->get_setting( 'test_ip' );
 		$enable_wc_eshieldbr_debug_log = ( isset( $_POST['submit'] ) && isset( $_POST['enable_wc_eshieldbr_debug_log'] ) ) ? 'yes' : ( ( ( isset( $_POST['submit'] ) && !isset( $_POST['enable_wc_eshieldbr_debug_log'] ) ) ) ? 'no' : $this->get_setting( 'debug_log' ) );
 
 		if ( isset( $_POST['submit'] ) ) {
-			// if ( !preg_match( '/^[0-9A-Z]{32}$/', $username ) ) {
-			// 	$form_status .= '
-			// 	<div id="message" class="error">
-			// 		<p><strong>ERROR</strong>: Please enter a valid EshieldBR Username and Password.</p>
-			// 	</div>';
-			// }
-
-			if ( !empty( $test_ip ) && !filter_var( $test_ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) ) {
-				$form_status .= '
-				<div id="message" class="error">
-					<p><strong>ERRO</strong>: Por favor, insira um endereço IP válido.</p>
-				</div>';
-			}
 
 			if ( empty( $form_status ) ) {
 				$this->update_setting( 'enabled', $enable_wc_eshieldbr );
@@ -554,7 +516,6 @@ class WC_EshieldBR {
 				$this->update_setting( 'reject_status', $reject_status );
 				$this->update_setting( 'db_err_status', $db_err_status );
 				$this->update_setting( 'fraud_message', $fraud_message );
-				$this->update_setting( 'test_ip', $test_ip );
 				$this->update_setting( 'debug_log', $enable_wc_eshieldbr_debug_log );
 
 				$form_status = '
@@ -633,7 +594,6 @@ class WC_EshieldBR {
 					<input type="hidden" name="reject_status" id="reject_status" value="' . $reject_status . '" />
 					<input type="hidden" name="db_err_status" id="db_err_status" value="' . $db_err_status . '" />
 					<input type="hidden" name="fraud_message" id="fraud_message" value="' . $fraud_message . '" />
-					<input type="hidden" name="test_ip" id="test_ip" value="' . $test_ip . '" />				
 					<input type="submit" name="submit" id="submit" class="button button-primary" value="Salvar Alterações" />
 				</p>
 			</form>
@@ -778,6 +738,7 @@ class WC_EshieldBR {
 			$this->write_debug_log( 'Dados a serem enviado para EshieldBR(fraud_report): ' . serialize($data) );
 
 			$request = wp_remote_post( $url, array(
+				'timeout' => 45,
 			    'body'    => $data,
 			    'headers' => array(
 			        'Authorization' => $token,
@@ -794,23 +755,20 @@ class WC_EshieldBR {
 				// 2020-11-27 12:52:43	$response->resposta->aprovado: REVIEW
 
 				if ( is_object( $response ) ) {
-					if( isset($response->resposta->aprovado) && $response->resposta->aprovado == 'APPROVE' )
-					{
+					if( isset($response->resposta->aprovado) && $response->resposta->aprovado == 'APPROVE' ) {
+
 						if( $this->approve_status && $order->get_status() != 'wc-completed' ) {
 							$this->write_debug_log( 'O status da EshieldBR mudou de Em Análise para Aprovado e o status do pedido foi alterado.' );
 							$order->add_order_note( 'O status da EshieldBR mudou de Em Análise para Aprovado e o status do pedido foi alterado.' );
 							$order->update_status( $this->approve_status, '' );
 
-							echo '
-							<script>window.location.href = window.location.href;</script>';
-						}
-						else{
+							echo '<script>window.location.href = window.location.href;</script>';
+						} else {
 							//only add the note
 							$this->write_debug_log( 'O status da EshieldBR mudou de Em Análise para Aprovado.' );
 							$order->add_order_note( 'O status da EshieldBR mudou de Em Análise para Aprovado.' );
 
-							echo '
-							<script>window.location.href = window.location.href;</script>';
+							echo '<script>window.location.href = window.location.href;</script>';
 						}
 
 						$result = get_post_meta( sanitize_text_field($_GET['post']), '_eshieldbr' );
@@ -829,23 +787,20 @@ class WC_EshieldBR {
 						update_post_meta( sanitize_text_field($_GET['post']), '_eshieldbr', $row );
 					}
 
-					if( isset($response->resposta->aprovado) && $response->resposta->aprovado == 'DECLINE' )
-					{
+					if( isset($response->resposta->aprovado) && $response->resposta->aprovado == 'DECLINE' ) {
+
 						if( $this->reject_status ) {
 							$this->write_debug_log( 'O status da EshieldBR mudou de Em Análise para Reprovado e o status do pedido foi alterado.' );
 							$order->add_order_note( 'O status da EshieldBR mudou de Em Análise para Reprovado e o status do pedido foi alterado.' );
 							$order->update_status( $this->reject_status, '' );
 
-							echo '
-							<script>window.location.href = window.location.href;</script>';
-						}
-						else{
+							echo '<script>window.location.href = window.location.href;</script>';
+						} else {
 							//just add the note
 							$this->write_debug_log( 'O status da EshieldBR mudou de Em Análise para Reprovado.' );
 							$order->add_order_note( 'O status da EshieldBR mudou de Em Análise para Reprovado.' );
 
-							echo '
-							<script>window.location.href = window.location.href;</script>';
+							echo '<script>window.location.href = window.location.href;</script>';
 						}
 
 						$result = get_post_meta( sanitize_text_field($_GET['post']), '_eshieldbr' );
@@ -889,8 +844,8 @@ class WC_EshieldBR {
 					$row = $result[0];
 				}
 
-				if( is_array( $result[0] ) ){
-					if ( $row['eshieldbr_id'] != '' ){
+				if( is_array( $result[0] ) ) {
+					if ( $row['eshieldbr_id'] != '' ) {
 						$table = '
 						<style type="text/css">
 							.eshieldbr {width:100%;}
@@ -1010,7 +965,7 @@ class WC_EshieldBR {
 						echo '
 						<script>
 						jQuery(function(){
-							jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR.</blockquote></div></div>\');
+							jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR1.</blockquote></div></div>\');
 						});
 						</script>';
 					}
@@ -1019,7 +974,7 @@ class WC_EshieldBR {
 				echo '
 				<script>
 				jQuery(function(){
-					jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR.</blockquote></div></div>\');
+					jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR2.</blockquote></div></div>\');
 				});
 				</script>';
 			}
@@ -1027,7 +982,7 @@ class WC_EshieldBR {
 			echo '
 			<script>
 			jQuery(function(){
-				jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR.</blockquote></div></div>\');
+				jQuery("#woocommerce-order-items").before(\'<div class="metabox-holder"><div class="postbox"><h2>Detalhes EshieldBR</h2><blockquote>Este pedido não foi rastreado pela EshieldBR3.</blockquote></div></div>\');
 			});
 			</script>';
 		}
